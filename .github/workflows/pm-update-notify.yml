@@ -1,0 +1,63 @@
+name: PM-Update Notify
+
+# Ported from disasters-portal/.github/workflows/pm-update-notify.yml.
+# There it keyed on the `PM-Update` label; here it keys on `smartsheet`, the
+# label every migrated tracking row carries.
+#
+# The @-mention is what delivers the email -- GitHub notifies mentioned users
+# at their account email address, so no SMTP secret is involved.
+# Recipients come from the `PM_UPDATE_RECIPIENTS` repo variable, same as the
+# source workflow (space- or comma-separated GitHub handles).
+#
+# Issues only: this repo holds the schedule, not code, so the source workflow's
+# pull_request_target half would never fire and is dropped.
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  issues: write
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.issue.state_reason != 'not_planned'
+      && contains(github.event.issue.labels.*.name, 'smartsheet')
+    steps:
+      - name: Comment and tag recipients
+        uses: actions/github-script@v7
+        env:
+          RECIPIENTS: ${{ vars.PM_UPDATE_RECIPIENTS }}
+        with:
+          script: |
+            const raw = process.env.RECIPIENTS || '';
+            const mentions = raw
+              .split(/[\s,]+/)
+              .filter(Boolean)
+              .map(h => '@' + h.replace(/^@+/, ''))
+              .join(' ');
+
+            const item = context.payload.issue;
+            const owners = (item.labels || [])
+              .map(l => l.name)
+              .filter(n => n.startsWith('owner:'))
+              .join(', ');
+
+            const body = [
+              `✅ **Tracking issue completed** — #${item.number} ${item.title}`,
+              '',
+              owners ? `Owner: ${owners}` : '',
+              mentions || '_No recipients configured — set the `PM_UPDATE_RECIPIENTS` repository variable (space-separated GitHub handles)._',
+              '',
+              '---',
+              '_Sent automatically from a GitHub Action (`PM-Update Notify` workflow)._'
+            ].filter(Boolean).join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: item.number,
+              body,
+            });

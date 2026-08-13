@@ -1,0 +1,57 @@
+name: Due-soon reminder
+
+# Posts a heads-up comment on any open tracking issue whose scheduled end date
+# (the "**Schedule:** 23d — 2026-08-31 → 2026-09-30" line in the body) is within
+# LEAD_DAYS. One comment per issue per end date -- see .github/scripts/.
+
+on:
+  schedule:
+    # 13:00 UTC = 09:00 ET / 08:00 EST, weekday mornings.
+    - cron: "0 13 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print what would be posted, post nothing"
+        type: boolean
+        default: true
+      lead_days:
+        description: "Remind when the end date is this many days away"
+        type: string
+        default: "3"
+      issue:
+        description: "Only check this issue number (blank = all open issues)"
+        type: string
+        default: ""
+      today:
+        description: "Pretend today is this date, YYYY-MM-DD (blank = real today)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: due-soon-reminder
+  cancel-in-progress: false
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Post reminders
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          LEAD_DAYS: ${{ inputs.lead_days || '3' }}
+          TODAY: ${{ inputs.today }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          REQUIRED_LABEL: smartsheet
+        run: |
+          python3 .github/scripts/due_soon_reminder.py \
+            ${{ inputs.issue && format('--issue {0}', inputs.issue) || '' }}
