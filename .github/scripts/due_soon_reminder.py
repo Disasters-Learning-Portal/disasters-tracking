@@ -83,36 +83,74 @@ def has_label(issue, wanted):
     )
 
 
-def render_comment(issue, end_date, today, assignees):
-    remaining = days_until(end_date, today)
-    if remaining == 0:
-        headline = "**Due today** — scheduled end date is **{}**.".format(end_date.isoformat())
-    elif remaining == 1:
-        headline = "**1 day left** — scheduled end date is **{}** (tomorrow).".format(
-            end_date.isoformat()
-        )
-    else:
-        headline = "**{} days left** — scheduled end date is **{}**.".format(
-            remaining, end_date.isoformat()
-        )
+BOARD_URL = "https://github.com/orgs/Disasters-Learning-Portal/projects/5"
+WORKFLOW_URL = (
+    "https://github.com/Disasters-Learning-Portal/disasters-tracking"
+    "/blob/main/.github/workflows/due-soon-reminder.yml"
+)
 
-    mentions = " ".join("@" + a for a in assignees)
+
+def headline_for(remaining):
+    """Severity dot + headline. Read in an email subject-line glance."""
+    if remaining <= 0:
+        return "🔴 Due today"
+    if remaining == 1:
+        return "🟠 1 day left"
+    if remaining <= 3:
+        return "🟡 {} days left".format(remaining)
+    return "🟢 {} days left".format(remaining)
+
+
+def owners_of(issue):
+    """The `owner: VEDA` / `owner: Disasters` labels, stripped of the prefix."""
+    names = [
+        (label.get("name") or "")
+        for label in issue.get("labels") or []
+        if (label.get("name") or "").lower().startswith("owner:")
+    ]
+    return ", ".join(n.split(":", 1)[1].strip() for n in names)
+
+
+def render_comment(issue, end_date, today, assignees):
+    """Build the reminder comment.
+
+    Markdown only -- GitHub's notification email renders headings, tables and
+    <sub>, but strips arbitrary HTML/CSS, so the layout has to survive as
+    plain markdown in a mail client.
+    """
+    remaining = days_until(end_date, today)
+    pretty_date = "{} ({})".format(end_date.isoformat(), end_date.strftime("%a"))
+    if remaining == 1:
+        pretty_date += " — tomorrow"
+
+    number = issue.get("number")
+    ticket = "#{}".format(number) if number else "this ticket"
+    owners = owners_of(issue)
+
     lines = [
         marker_for(end_date),
-        "⏳ " + headline,
+        "## ⏳ {}".format(headline_for(remaining)),
         "",
-        "Please update the status here (or on the "
-        "[project board](https://github.com/orgs/Disasters-Learning-Portal/projects/5)) "
-        "if the date has moved — the schedule line in the issue body is what this "
-        "reminder reads.",
+        "| Ticket | End date | Days left | Owner |",
+        "| :--- | :--- | :---: | :--- |",
+        "| {} | **{}** | **{}** | {} |".format(ticket, pretty_date, remaining, owners or "—"),
+        "",
     ]
-    if mentions:
-        lines += ["", "cc {}".format(mentions)]
+
+    if assignees:
+        lines.append(
+            "{} — is this still on track?".format(" ".join("**@" + a + "**" for a in assignees))
+        )
+    else:
+        lines.append("**Unassigned** — no one is currently on this ticket.")
+
     lines += [
         "",
-        "<sub>Automated by [`due-soon-reminder`](https://github.com/"
-        "Disasters-Learning-Portal/disasters-tracking/blob/main/"
-        ".github/workflows/due-soon-reminder.yml).</sub>",
+        "If the date has moved, edit the `**Schedule:**` line in the issue body — "
+        "that line is what this reminder reads. Closing the issue stops the reminders.",
+        "",
+        "<sub>Automated by [`due-soon-reminder`]({}) · "
+        "[project board]({})</sub>".format(WORKFLOW_URL, BOARD_URL),
     ]
     return "\n".join(lines)
 

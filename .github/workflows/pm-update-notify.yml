@@ -43,17 +43,36 @@ jobs:
             const owners = (item.labels || [])
               .map(l => l.name)
               .filter(n => n.startsWith('owner:'))
+              .map(n => n.split(':')[1].trim())
               .join(', ');
+            const assignees = (item.assignees || []).map(a => '@' + a.login).join(' ');
+            const closedBy = context.payload.sender ? '@' + context.payload.sender.login : '—';
+            const closedOn = (item.closed_at || new Date().toISOString()).slice(0, 10);
+            const schedule = (item.body || '').match(/^\s*\**Schedule:?\**\s*:?.*$/mi);
+            const endDate = schedule ? (schedule[0].match(/\d{4}-\d{2}-\d{2}/g) || []).slice(-1)[0] : null;
 
-            const body = [
-              `✅ **Tracking issue completed** — #${item.number} ${item.title}`,
+            // Markdown only: GitHub's notification email renders headings and
+            // tables but strips arbitrary HTML/CSS. Blank lines are load-bearing
+            // separators, so build the array by pushing rather than filtering.
+            const lines = [
+              '## ✅ Completed',
               '',
-              owners ? `Owner: ${owners}` : '',
-              mentions || '_No recipients configured — set the `PM_UPDATE_RECIPIENTS` repository variable (space-separated GitHub handles)._',
+              `**${item.title}**`,
               '',
-              '---',
-              '_Sent automatically from a GitHub Action (`PM-Update Notify` workflow)._'
-            ].filter(Boolean).join('\n');
+              '| Ticket | Owner | Scheduled end | Closed | Closed by |',
+              '| :--- | :--- | :--- | :--- | :--- |',
+              `| #${item.number} | ${owners || '—'} | ${endDate || '—'} | ${closedOn} | ${closedBy} |`,
+              '',
+            ];
+            if (assignees) lines.push(`Worked by ${assignees}.`, '');
+            lines.push(
+              mentions
+                ? `${mentions} — closing the loop for the schedule.`
+                : '_No recipients configured — set the `PM_UPDATE_RECIPIENTS` repository variable (space-separated GitHub handles)._',
+              '',
+              '<sub>Automated by [`PM-Update Notify`](https://github.com/Disasters-Learning-Portal/disasters-tracking/blob/main/.github/workflows/pm-update-notify.yml) · [project board](https://github.com/orgs/Disasters-Learning-Portal/projects/5)</sub>'
+            );
+            const body = lines.join('\n');
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,

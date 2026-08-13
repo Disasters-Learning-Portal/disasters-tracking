@@ -120,24 +120,67 @@ class TestLabelGate(unittest.TestCase):
         self.assertFalse(m.has_label({"labels": [{"name": "smartsheet-legacy"}]}, "smartsheet"))
 
 
+ISSUE = {
+    "number": 58,
+    "labels": [{"name": "owner: Disasters"}, {"name": "smartsheet"}],
+}
+
+
+class TestHeadline(unittest.TestCase):
+    def test_severity_escalates_as_the_date_approaches(self):
+        self.assertEqual(m.headline_for(3), "🟡 3 days left")
+        self.assertEqual(m.headline_for(1), "🟠 1 day left")
+        self.assertEqual(m.headline_for(0), "🔴 Due today")
+
+    def test_singular_day(self):
+        self.assertNotIn("1 days", m.headline_for(1))
+
+
+class TestOwners(unittest.TestCase):
+    def test_prefix_stripped(self):
+        self.assertEqual(m.owners_of(ISSUE), "Disasters")
+
+    def test_joint_ownership(self):
+        issue = {"labels": [{"name": "owner: Disasters"}, {"name": "owner: VEDA"}]}
+        self.assertEqual(m.owners_of(issue), "Disasters, VEDA")
+
+    def test_no_owner_label(self):
+        self.assertEqual(m.owners_of({"labels": [{"name": "EPIC"}]}), "")
+
+
 class TestRenderComment(unittest.TestCase):
-    def test_three_days_wording_and_mention(self):
-        body = m.render_comment({}, dt.date(2026, 8, 16), TODAY, ["kyle-lesinger"])
-        self.assertIn("**3 days left**", body)
-        self.assertIn("2026-08-16", body)
-        self.assertIn("cc @kyle-lesinger", body)
+    def test_three_days_layout(self):
+        body = m.render_comment(ISSUE, dt.date(2026, 8, 16), TODAY, ["kyle-lesinger"])
         self.assertTrue(body.startswith(m.marker_for(dt.date(2026, 8, 16))))
+        self.assertIn("## ⏳ 🟡 3 days left", body)
+        self.assertIn("| Ticket | End date | Days left | Owner |", body)
+        self.assertIn("| #58 | **2026-08-16 (Sun)** | **3** | Disasters |", body)
+        self.assertIn("**@kyle-lesinger** — is this still on track?", body)
+
+    def test_table_rows_have_matching_column_counts(self):
+        body = m.render_comment(ISSUE, dt.date(2026, 8, 16), TODAY, [])
+        rows = [ln for ln in body.splitlines() if ln.startswith("|")]
+        self.assertEqual(len(rows), 3)  # header, alignment, one data row
+        self.assertEqual(len({r.count("|") for r in rows}), 1)
 
     def test_tomorrow_and_today_wording(self):
-        self.assertIn("1 day left", m.render_comment({}, dt.date(2026, 8, 14), TODAY, []))
-        self.assertIn("Due today", m.render_comment({}, TODAY, TODAY, []))
+        tomorrow = m.render_comment(ISSUE, dt.date(2026, 8, 14), TODAY, [])
+        self.assertIn("🟠 1 day left", tomorrow)
+        self.assertIn("tomorrow", tomorrow)
+        self.assertIn("🔴 Due today", m.render_comment(ISSUE, TODAY, TODAY, []))
 
-    def test_unassigned_issue_has_no_dangling_cc(self):
-        self.assertNotIn("cc", m.render_comment({}, dt.date(2026, 8, 16), TODAY, []))
+    def test_unassigned_issue_says_so(self):
+        body = m.render_comment(ISSUE, dt.date(2026, 8, 16), TODAY, [])
+        self.assertIn("**Unassigned**", body)
+        self.assertNotIn("@", body.split("<sub>")[0].split("| #58")[1])
 
     def test_multiple_assignees(self):
-        body = m.render_comment({}, dt.date(2026, 8, 16), TODAY, ["a-dev", "b-dev"])
-        self.assertIn("cc @a-dev @b-dev", body)
+        body = m.render_comment(ISSUE, dt.date(2026, 8, 16), TODAY, ["a-dev", "b-dev"])
+        self.assertIn("**@a-dev** **@b-dev**", body)
+
+    def test_missing_number_and_labels_do_not_crash(self):
+        body = m.render_comment({}, dt.date(2026, 8, 16), TODAY, [])
+        self.assertIn("| this ticket | **2026-08-16 (Sun)** | **3** | — |", body)
 
 
 class TestPagination(unittest.TestCase):
